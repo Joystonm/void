@@ -16,10 +16,11 @@ const renderer=new THREE.WebGLRenderer({canvas:$('space'),antialias:true,powerPr
 renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));renderer.setSize(innerWidth,innerHeight);renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.1;
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x000003);
 const camera=new THREE.PerspectiveCamera(53,innerWidth/innerHeight,.1,2500);camera.position.set(0,3,19);camera.lookAt(0,0,-40);
-const composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,camera));const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.68,.65,.85);composer.addPass(bloom);composer.addPass(new OutputPass());
+const composer=new EffectComposer(renderer);
+const samples=Math.min(4,renderer.capabilities.maxSamples);composer.renderTarget1.samples=samples;composer.renderTarget2.samples=samples;composer.addPass(new RenderPass(scene,camera));const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.68,.65,.85);composer.addPass(bloom);composer.addPass(new OutputPass());
 let seed=417;function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;}
 const planetCenter=new THREE.Vector3(40,-32,-150),radius=65;
-const geometry=new THREE.IcosahedronGeometry(radius,110);const pos=geometry.attributes.position,colors=[],emissions=[];
+const geometry=new THREE.IcosahedronGeometry(radius,150);const pos=geometry.attributes.position,colors=[],emissions=[];
 const terrainNormal=new THREE.Vector3();
 for(let i=0;i<pos.count;i++){terrainNormal.fromBufferAttribute(pos,i).normalize();terrainNormal.multiplyScalar(radius+terrainHeight(terrainNormal));pos.setXYZ(i,terrainNormal.x,terrainNormal.y,terrainNormal.z);}
 geometry.computeVertexNormals();
@@ -54,17 +55,20 @@ planet.material.onBeforeCompile=shader=>{
  shader.fragmentShader=shader.fragmentShader.replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n totalEmissiveRadiance+=vTerrainEmission;');
 };
 planet.material.customProgramCacheKey=()=> 'entry-terrain-lava';
-const exteriorGeometry=new THREE.IcosahedronGeometry(radius,36);
+const exteriorGeometry=new THREE.IcosahedronGeometry(radius,80);
 const exteriorColors=[],exteriorPosition=exteriorGeometry.attributes.position;
-const exteriorPalette=[0x073b58,0x075c70,0x112b59,0x252459,0x452969].map(c=>new THREE.Color(c));
-for(let i=0;i<exteriorPosition.count;i+=3){
- v.fromBufferAttribute(exteriorPosition,i).normalize();
- const region=Math.sin(v.x*9+Math.sin(v.z*8)*1.8)+Math.cos(v.y*11-v.z*5);
- const col=exteriorPalette[Math.max(0,Math.min(4,Math.floor((region+2)*1.2)))];
- for(let k=0;k<3;k++)exteriorColors.push(col.r,col.g,col.b);
+const oceanColor=new THREE.Color('#073954'),landColor=new THREE.Color('#146779'),ridgeColor=new THREE.Color('#493f75');
+const exteriorColor=new THREE.Color();
+for(let i=0;i<exteriorPosition.count;i++){
+ v.fromBufferAttribute(exteriorPosition,i).normalize();const geography=terrainSignals(v);
+ exteriorColor.copy(oceanColor).lerp(landColor,geography.land*.78).lerp(ridgeColor,geography.highlands*.65);
+ exteriorColor.lerp(new THREE.Color('#7a8fab'),geography.ice*.5);
+ const detail=Math.sin(v.x*75+Math.sin(v.z*31))*Math.cos(v.y*63-v.z*19);
+ exteriorColor.multiplyScalar(.97+detail*.035);
+ exteriorColors.push(exteriorColor.r,exteriorColor.g,exteriorColor.b);
 }
 exteriorGeometry.setAttribute('color',new THREE.Float32BufferAttribute(exteriorColors,3));
-const exterior=new THREE.Mesh(exteriorGeometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,flatShading:true}));
+const exterior=new THREE.Mesh(exteriorGeometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:.88,flatShading:false}));
 exterior.material.side=THREE.DoubleSide;
 exterior.position.copy(planetCenter);entryMaterial(exterior.material,false);scene.add(exterior);
 const atmosphere=new THREE.Mesh(new THREE.SphereGeometry(radius*1.008,128,64),new THREE.ShaderMaterial({uniforms:{},vertexShader:`varying vec3 n;varying vec3 eye;void main(){vec4 p=modelViewMatrix*vec4(position,1.);n=normalize(normalMatrix*normal);eye=normalize(-p.xyz);gl_Position=projectionMatrix*p;}`,fragmentShader:`varying vec3 n;varying vec3 eye;void main(){float f=1.-max(0.,dot(normalize(n),normalize(eye)));float a=pow(f,8.);gl_FragColor=vec4(vec3(.025,.58,1.5)*a*2.,a*.85);}`,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending}));atmosphere.position.copy(planetCenter);scene.add(atmosphere);
@@ -177,10 +181,11 @@ function frame(){
   if(!stopped&&loaded){
     elapsed+=dt;
     const dx=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));
-    const dy=Number(keys.has('ArrowUp')||keys.has('KeyQ'))-Number(keys.has('ArrowDown')||keys.has('KeyE'));
+    const dy=Number(keys.has('ArrowUp'))-Number(keys.has('ArrowDown'));
+    const vertical=keys.has('KeyS')?0:Number(keys.has('KeyQ'))-Number(keys.has('KeyE'));
     const boosting=!keys.has('KeyS')&&(keys.has('ShiftLeft')||keys.has('ShiftRight'));
     const thrust=keys.has('KeyS')?0:Number(keys.has('KeyW')||boosting);
-    let remaining=dt;while(remaining>0){const step=Math.min(remaining,1/120);journey.step(step,boosting,dx,dy,thrust);remaining-=step;}
+    let remaining=dt;while(remaining>0){const step=Math.min(remaining,1/120);journey.step(step,boosting,dx,dy,thrust,vertical);remaining-=step;}
     boost=journey.boost;
     flightRig.position.copy(journey.position);
     directionTarget.copy(journey.position).add(journey.forward);
@@ -231,6 +236,7 @@ function frame(){
   if(!stopped&&loaded){
     combat.update(dt,journey,worldShip,Math.max(.32,ship.scale.x*1.7),(origin,direction,length)=>weapons.rayHit(origin,direction,length));
     aimClock-=dt;if(aimClock<=0){weapons.updateAim(camera,journey);aimClock=.1;}
+    weapons.shipVelocity.copy(journey.velocity);
     weapons.update(dt,rightFire||keys.has('ControlLeft')||keys.has('ControlRight'));
   }
   defeated.hidden=!combat.destroyed;
@@ -255,9 +261,9 @@ function frame(){
   const altitude=Math.max(0,(worldShip.distanceTo(planetCenter)-radius-terrainHeight(groundNormal))*METRES_PER_UNIT);
   const surface=journey.surface;
   document.querySelector('.navigation h1 + small').textContent=surface?terrainSignals(journey.normal).biome.toUpperCase():'OCEANIC WORLD / CLASS IV';
-  $('velocity').textContent=stopped?'0':Math.round(journey.speed*METRES_PER_UNIT);
+  $('velocity').textContent=stopped?'0':Math.round(journey.velocity.length()*METRES_PER_UNIT);
   document.querySelector('#velocity + .unit').textContent='m/s';
-  $('profile').textContent=stopped?'HOLD':journey.speed<.01?'IDLE':boost>.4?'BOOST x4':journey.terrainFollowing?'ALTITUDE HOLD':surface?(boost>.4?'SURFACE BOOST':'SURFACE CRUISE'):(boost>.4?'PULSE BOOST':journey.assisted?'DESCENT ASSIST':'MANUAL FLIGHT');
+  $('profile').textContent=stopped?'HOLD':journey.velocity.length()<.01?'IDLE':boost>.4?'BOOST x4':journey.terrainFollowing?'ALTITUDE HOLD':surface?(boost>.4?'SURFACE BOOST':'SURFACE CRUISE'):(boost>.4?'PULSE BOOST':journey.assisted?'DESCENT ASSIST':'MANUAL FLIGHT');
   $('range').textContent=altitude<1000?Math.round(altitude).toLocaleString('en-US'):(altitude/1000).toFixed(2);
   document.querySelector('.navigation p b').textContent=altitude<1000?'m':'km';
   $('altitude').textContent=$('range').textContent;
@@ -266,7 +272,7 @@ function frame(){
   phaseLabel.firstChild.textContent=journey.phase+' ';
   const eta=Math.ceil(journey.remainingSeconds);
   $('arrival').textContent=!journey.assisted?'MANUAL':surface?'LIVE':String(Math.floor(eta/60)).padStart(2,'0')+':'+String(eta%60).padStart(2,'0');
-  hint.textContent=stopped?'FLIGHT HOLD / SPACE TO RESUME':journey.terrainFollowing?'W FLY / SHIFT BOOST x4 / A D TURN / UP DOWN ALTITUDE / S BRAKE':orbit.active?'W THRUST / A D TURN / UP DOWN AIM / V CHASE VIEW':'W THRUST / SHIFT BOOST x4 / A D TURN / DRAG TO LOOK 360';
+  hint.textContent=stopped?'FLIGHT HOLD / SPACE TO RESUME':journey.terrainFollowing?'W FLY / Q E RISE DESCEND / SHIFT BOOST / A D TURN / S BRAKE':orbit.active?'W THRUST / A D TURN / UP DOWN AIM / V CHASE VIEW':'W THRUST / Q E RISE DESCEND / SHIFT BOOST / DRAG TO LOOK 360';
   document.querySelector('.destination').style.opacity=surface?'0':'1';
   document.querySelector('.coordinates').textContent=`X ${worldShip.x.toFixed(2)}  Y ${worldShip.y.toFixed(2)}  Z ${worldShip.z.toFixed(2)}`;
   composer.render();

@@ -3,7 +3,7 @@ import {terrainHeight,terrainColor} from './terrain.js';
 import {addCrater,craterCount} from './deformation.js';
 export class PulseCannons{
  constructor(scene,ship,terrain,scenery,center,radius){
-  Object.assign(this,{scene,ship,terrain,scenery,center,radius});this.cooldown=0;this.effects=[];this.projectiles=[];this.aimPoint=null;this.status='READY';this.hits=0;
+  Object.assign(this,{scene,ship,terrain,scenery,center,radius});this.cooldown=0;this.effects=[];this.projectiles=[];this.shipVelocity=new THREE.Vector3();this.aimPoint=null;this.status='READY';this.hits=0;
   this.muzzles=[];
   const housing=new THREE.MeshStandardMaterial({color:0x202b35,metalness:.75,roughness:.48});
   const emitter=new THREE.MeshBasicMaterial({color:new THREE.Color(.08,1.1,1.7)});
@@ -21,8 +21,12 @@ export class PulseCannons{
  surfaceDistance(p){const n=p.clone().sub(this.center).normalize();return p.distanceTo(this.center)-this.radius-Math.max(-7.975,terrainHeight(n));}
  rayHit(origin,direction,maxDistance=220){
   if(maxDistance<=0)return null;
+  const offset=origin.clone().sub(this.center),b=offset.dot(direction),c=offset.lengthSq()-(this.radius+1)**2,disc=b*b-c;
+  if(disc<0)return null;
+  const near=-b-Math.sqrt(disc),far=-b+Math.sqrt(disc);
+  if(far<0||near>maxDistance)return null;
   if(this.surfaceDistance(origin)<=0)return origin.clone();
-  let last=0,distance=Math.min(.2,maxDistance);
+  let last=Math.max(0,near-.1),distance=Math.min(last+.2,maxDistance);
   while(true){
    const p=origin.clone().addScaledVector(direction,distance);
    if(this.surfaceDistance(p)<=0){
@@ -70,17 +74,19 @@ export class PulseCannons{
   const direction=new THREE.Vector3(0,0,-1).applyQuaternion(this.ship.getWorldQuaternion(new THREE.Quaternion())).normalize();
   if(this.enemyTarget&&!this.enemyTarget.dead){
    const origin=this.ship.getWorldPosition(new THREE.Vector3());
-   const lead=this.enemyTarget.root.position.clone().addScaledVector(this.enemyTarget.velocity,origin.distanceTo(this.enemyTarget.root.position)/28);
+   const lead=this.enemyTarget.root.position.clone().addScaledVector(this.enemyTarget.velocity,origin.distanceTo(this.enemyTarget.root.position)/(90+this.shipVelocity.length()));
    const assisted=lead.sub(origin).normalize();if(assisted.dot(direction)>.97)direction.copy(assisted);
   }
+  const launchVelocity=direction.clone().multiplyScalar(90).add(this.shipVelocity);
+  const launchSpeed=launchVelocity.length(),launchDirection=launchVelocity.normalize();
   const scale=this.ship.getWorldScale(new THREE.Vector3()).x;
   for(const muzzle of this.muzzles){
    const from=muzzle.getWorldPosition(new THREE.Vector3()).addScaledVector(direction,.1*scale);
-   const width=Math.max(.025,.07*scale),length=Math.max(.7,1.1*scale);
+   const width=Math.max(.025,.07*scale),length=Math.max(1.2,launchSpeed*.025);
    const bolt=new THREE.Mesh(new THREE.CylinderGeometry(width,width,length,6),new THREE.MeshBasicMaterial({color:0x7ef5ff,toneMapped:false}));
-   bolt.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),direction);
-   bolt.position.copy(from).addScaledVector(direction,-length*.5);this.scene.add(bolt);
-   this.projectiles.push({mesh:bolt,position:from,direction:direction.clone(),speed:28,life:7,length});
+   bolt.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),launchDirection);
+   bolt.position.copy(from).addScaledVector(launchDirection,-length*.5);this.scene.add(bolt);
+   this.projectiles.push({mesh:bolt,position:from,direction:launchDirection.clone(),speed:launchSpeed,life:Math.min(7,360/launchSpeed),length});
    const flash=new THREE.Mesh(new THREE.IcosahedronGeometry(.14*scale,1),new THREE.MeshBasicMaterial({color:0xbaffff,transparent:true,opacity:.8,toneMapped:false}));
    flash.position.copy(from);this.scene.add(flash);this.effects.push({mesh:flash,life:.07,total:.07,burst:false});
   }
