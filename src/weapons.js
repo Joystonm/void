@@ -3,7 +3,7 @@ import {terrainHeight,terrainColor} from './terrain.js';
 import {addCrater,craterCount} from './deformation.js';
 export class PulseCannons{
  constructor(scene,ship,terrain,scenery,center,radius){
-  Object.assign(this,{scene,ship,terrain,scenery,center,radius});this.cooldown=0;this.effects=[];this.projectiles=[];this.shipVelocity=new THREE.Vector3();this.aimPoint=null;this.status='READY';this.hits=0;
+  Object.assign(this,{scene,ship,terrain,scenery,center,radius});this.cooldown=0;this.effects=[];this.projectiles=[];this.shipVelocity=new THREE.Vector3();this.aimPoint=null;this.status='READY';this.hits=0;this.hitFlash=0;this.pointerAim=null;
   this.muzzles=[];
   const housing=new THREE.MeshStandardMaterial({color:0x202b35,metalness:.75,roughness:.48});
   const emitter=new THREE.MeshBasicMaterial({color:new THREE.Color(.08,1.1,1.7)});
@@ -41,11 +41,23 @@ export class PulseCannons{
  updateAim(camera,journey){
   this.ship.updateWorldMatrix(true,true);
   const origin=this.muzzles[0].getWorldPosition(new THREE.Vector3()).add(this.muzzles[1].getWorldPosition(new THREE.Vector3())).multiplyScalar(.5);
-  const direction=new THREE.Vector3(0,0,-1).applyQuaternion(this.ship.getWorldQuaternion(new THREE.Quaternion()));
-  this.aimPoint=this.rayHit(origin,direction,180);
-  this.enemyTarget=this.combat?.aimTarget(origin,direction);
-  if(this.enemyTarget){const targetDistance=origin.distanceTo(this.enemyTarget.root.position);if(!this.rayHit(origin,this.enemyTarget.root.position.clone().sub(origin).normalize(),targetDistance))this.aimPoint=this.enemyTarget.root.position.clone();else this.enemyTarget=null;}
-  this.aimPreview=this.aimPoint??origin.clone().addScaledVector(direction,60);
+  let direction=new THREE.Vector3(0,0,-1).applyQuaternion(this.ship.getWorldQuaternion(new THREE.Quaternion())).multiplyScalar(160).add(this.shipVelocity).normalize();
+  let aimRange=180;
+  if(this.pointerAim){
+   const ray=new THREE.Raycaster();ray.setFromCamera(this.pointerAim,camera);
+   const ground=this.rayHit(ray.ray.origin,ray.ray.direction,180);
+   const enemy=this.combat?.raycastEnemies(ray.ray.origin,ray.ray.direction,180);
+   const distance=ground?ground.distanceTo(ray.ray.origin):Infinity;
+   // Both intersections are on the cursor ray. No target selection or tracking.
+   const point=enemy&&enemy.distance<distance?enemy.point:ground??ray.ray.at(30,new THREE.Vector3());
+   direction=point.clone().sub(origin).normalize();aimRange=origin.distanceTo(point);
+  }
+  this.aimPoint=this.rayHit(origin,direction,aimRange+.05);
+  const enemyHit=this.combat?.raycastEnemies(origin,direction,aimRange+.05);
+  const groundDistance=this.aimPoint?origin.distanceTo(this.aimPoint):Infinity;
+  this.onTarget=!!enemyHit&&enemyHit.distance<groundDistance;
+  // This point stays on the manually aimed ray, never on a target's center.
+  this.aimPreview=this.onTarget?enemyHit.point:this.aimPoint??origin.clone().addScaledVector(direction,this.pointerAim?aimRange:25);
  }
  deform(point){
   const n=point.clone().sub(this.center).normalize();
@@ -72,21 +84,17 @@ export class PulseCannons{
   if(this.cooldown>0)return;this.cooldown=.18;
   this.ship.updateWorldMatrix(true,true);
   const direction=new THREE.Vector3(0,0,-1).applyQuaternion(this.ship.getWorldQuaternion(new THREE.Quaternion())).normalize();
-  if(this.enemyTarget&&!this.enemyTarget.dead){
-   const origin=this.ship.getWorldPosition(new THREE.Vector3());
-   const lead=this.enemyTarget.root.position.clone().addScaledVector(this.enemyTarget.velocity,origin.distanceTo(this.enemyTarget.root.position)/(90+this.shipVelocity.length()));
-   const assisted=lead.sub(origin).normalize();if(assisted.dot(direction)>.97)direction.copy(assisted);
-  }
-  const launchVelocity=direction.clone().multiplyScalar(90).add(this.shipVelocity);
+  const launchVelocity=direction.clone().multiplyScalar(160).add(this.shipVelocity);
   const launchSpeed=launchVelocity.length(),launchDirection=launchVelocity.normalize();
   const scale=this.ship.getWorldScale(new THREE.Vector3()).x;
   for(const muzzle of this.muzzles){
    const from=muzzle.getWorldPosition(new THREE.Vector3()).addScaledVector(direction,.1*scale);
-   const width=Math.max(.025,.07*scale),length=Math.max(1.2,launchSpeed*.025);
+   const shotDirection=this.aimPreview?this.aimPreview.clone().sub(from).normalize():launchDirection;
+   const width=Math.max(.055,.1*scale),length=Math.max(1.2,launchSpeed*.025);
    const bolt=new THREE.Mesh(new THREE.CylinderGeometry(width,width,length,6),new THREE.MeshBasicMaterial({color:0x7ef5ff,toneMapped:false}));
-   bolt.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),launchDirection);
-   bolt.position.copy(from).addScaledVector(launchDirection,-length*.5);this.scene.add(bolt);
-   this.projectiles.push({mesh:bolt,position:from,direction:launchDirection.clone(),speed:launchSpeed,life:Math.min(7,360/launchSpeed),length});
+   bolt.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),shotDirection);
+   bolt.position.copy(from).addScaledVector(shotDirection,-length*.5);this.scene.add(bolt);
+   this.projectiles.push({mesh:bolt,position:from,direction:shotDirection.clone(),speed:launchSpeed,life:Math.min(7,360/launchSpeed),length});
    const flash=new THREE.Mesh(new THREE.IcosahedronGeometry(.14*scale,1),new THREE.MeshBasicMaterial({color:0xbaffff,transparent:true,opacity:.8,toneMapped:false}));
    flash.position.copy(from);this.scene.add(flash);this.effects.push({mesh:flash,life:.07,total:.07,burst:false});
   }
@@ -98,19 +106,19 @@ export class PulseCannons{
   flash.position.copy(point);flash.scale.setScalar(.08);this.scene.add(flash);this.effects.push({mesh:flash,life:.38,total:.38,burst:true});
  }
  update(dt,firing){
-  this.cooldown=Math.max(0,this.cooldown-dt);if(firing)this.fire();
+  this.hitFlash=Math.max(0,this.hitFlash-dt);this.cooldown=Math.max(0,this.cooldown-dt);if(firing)this.fire();
   for(let i=this.projectiles.length-1;i>=0;i--){
    const bolt=this.projectiles[i],travel=bolt.speed*Math.min(dt,bolt.life);
    const hit=this.rayHit(bolt.position,bolt.direction,travel);
    const enemyHit=this.combat?.raycastEnemies(bolt.position,bolt.direction,travel);
    bolt.life-=dt;
-   if(enemyHit&&(!hit||enemyHit.distance<hit.distanceTo(bolt.position))){this.combat.damageEnemy(enemyHit.enemy,22,enemyHit.point);bolt.life=0;this.status='ENEMY HIT';}
+   if(enemyHit&&(!hit||enemyHit.distance<hit.distanceTo(bolt.position))){this.combat.damageEnemy(enemyHit.enemy,22,enemyHit.point);bolt.life=0;this.status='ENEMY HIT';this.hitFlash=.2;}
    else if(hit){this.impact(hit);bolt.life=0;}
    else{bolt.position.addScaledVector(bolt.direction,travel);bolt.mesh.position.copy(bolt.position).addScaledVector(bolt.direction,-bolt.length*.5);}
    if(bolt.life<=0){this.scene.remove(bolt.mesh);bolt.mesh.geometry.dispose();bolt.mesh.material.dispose();this.projectiles.splice(i,1);}
   }
   for(let i=this.effects.length-1;i>=0;i--){const effect=this.effects[i];effect.life-=dt;effect.mesh.material.opacity=Math.max(0,effect.life/effect.total)*.8;if(effect.burst)effect.mesh.scale.setScalar(.08+(1-effect.life/effect.total)*.7);if(effect.life<=0){this.scene.remove(effect.mesh);effect.mesh.geometry.dispose();effect.mesh.material.dispose();this.effects.splice(i,1);}}
  }
- clearEffects(){for(const e of [...this.effects,...this.projectiles]){this.scene.remove(e.mesh);e.mesh.geometry.dispose();e.mesh.material.dispose();}this.effects=[];this.projectiles=[];this.cooldown=0;}
- get diagnostics(){return {craters:craterCount(),hits:this.hits,projectiles:this.projectiles.length,status:this.status};}
+ clearEffects(){for(const e of [...this.effects,...this.projectiles]){this.scene.remove(e.mesh);e.mesh.geometry.dispose();e.mesh.material.dispose();}this.effects=[];this.projectiles=[];this.cooldown=0;this.hitFlash=0;this.pointerAim=null;this.onTarget=false;this.aimPreview=null;}
+ get diagnostics(){return {aimMode:this.pointerAim?'MOUSE':'KEYBOARD',craters:craterCount(),hits:this.hits,projectiles:this.projectiles.length,status:this.status};}
 }
