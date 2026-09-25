@@ -1,3 +1,5 @@
+import {peaceful} from './world.js';
+import {gardenSignals,gardenColor,addGarden} from './elysia.js';
 import * as THREE from 'three';
 import {craterDelta,craterScorch} from './deformation.js';
 const smooth=THREE.MathUtils.smoothstep;
@@ -8,6 +10,9 @@ const valleyRight=new THREE.Vector3().crossVectors(valleyForward,valleyOrigin).n
 const volcano=valleyOrigin.clone().multiplyScalar(65).addScaledVector(valleyRight,-17).addScaledVector(valleyForward,18).normalize();
 const colors={ocean:new THREE.Color('#176478'),desert:new THREE.Color('#a18b69'),canyon:new THREE.Color('#876b63'),valley:new THREE.Color('#507b68'),ice:new THREE.Color('#acb8c4'),volcanic:new THREE.Color('#3e3947'),highlands:new THREE.Color('#77718b')};
 export function terrainSignals(n){
+ return peaceful?gardenSignals(n):aureliaSignals(n);
+}
+export function aureliaSignals(n){
  const x=n.dot(valleyRight)*65,z=n.dot(valleyForward)*65;
  const focus=smooth(n.dot(valleyOrigin),.55,.85);
  const rolling=.5+.5*Math.sin(n.x*12+n.z*7)*Math.cos(n.y*10-n.z*5);
@@ -44,6 +49,7 @@ export function terrainSignals(n){
 }
 export function terrainHeight(n){return terrainSignals(n).height-8+craterDelta(n);}
 export function terrainColor(n,out=new THREE.Color()){
+ if(peaceful)return gardenColor(n,out);
  const t=terrainSignals(n);
  out.copy(colors.valley).lerp(colors.desert,t.dry);
  out.lerp(colors.canyon,t.dry*t.plateaus*.6);
@@ -57,6 +63,7 @@ export function terrainColor(n,out=new THREE.Color()){
  return out;
 }
 export function addSurfaceRocks(scene,center,radius){
+ if(peaceful)return addGarden(scene,center,radius);
  const group=new THREE.Group();scene.add(group);
  const rockData=[],treeData=[];
  const normal=new THREE.Vector3();

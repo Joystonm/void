@@ -1,3 +1,4 @@
+import {peaceful} from './world.js';
 import * as THREE from 'three';
 import {terrainHeight} from './terrain.js';
 export class AtmosphereCombat{
@@ -15,14 +16,15 @@ export class AtmosphereCombat{
  get engagedCount(){return this.enemies.filter(e=>!e.dead&&e.state==='ENGAGING').length;}
  get incomingCount(){return this.pending.reduce((sum,batch)=>sum+batch.remaining,0);}
  get secondsToWave(){return Number.isFinite(this.nextWaveAt)?Math.max(0,Math.ceil(this.nextWaveAt-this.time)):0;}
- startPatrol(){if(this.time<20||this.patrolStarted||!this.templates)return;this.patrolStarted=true;this.nextWaveAt=this.time+5;}
+ startPatrol(){if(peaceful||this.time<20||this.patrolStarted||!this.templates)return;this.patrolStarted=true;this.nextWaveAt=this.time+5;}
  queueWave(){
+  if(peaceful)return;
   this.wave++;this.spawned=true;this.waveCleared=false;
   this.pending.push({tier:this.wave,total:Math.min(4,this.wave+1),remaining:Math.min(4,this.wave+1),nextLaunchAt:this.time});
   this.nextWaveAt=Infinity;
  }
  spawn(journey){
-  if(!this.templates||!this.patrolStarted||this.patrolComplete)return;
+  if(peaceful||!this.templates||!this.patrolStarted||this.patrolComplete)return;
   if(this.wave>0&&this.aliveCount===0&&this.pending.length===0&&!this.waveCleared){
    this.waveCleared=true;this.shield=100;this.hull=Math.min(100,this.hull+25);
    for(const bolt of this.bolts){this.scene.remove(bolt.mesh);bolt.mesh.geometry.dispose();bolt.mesh.material.dispose();}this.bolts=[];
@@ -71,7 +73,7 @@ export class AtmosphereCombat{
   const mesh=new THREE.Mesh(new THREE.CylinderGeometry(.045,.045,.65,6),new THREE.MeshBasicMaterial({color:0xff694b,toneMapped:false}));mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),direction);mesh.position.copy(from);this.scene.add(mesh);this.bolts.push({mesh,position:from,direction,life:5,speed:enemy.boltSpeed,damage:enemy.damage});
  }
  update(dt,journey,playerPosition,playerRadius,groundRay){
-  this.active=journey.inside&&!this.destroyed;
+  this.active=!peaceful&&journey.inside&&!this.destroyed;
   if(!this.active){for(const enemy of this.enemies)enemy.root.visible=false;for(const bolt of this.bolts){this.scene.remove(bolt.mesh);bolt.mesh.geometry.dispose();bolt.mesh.material.dispose();}this.bolts=[];for(const effect of this.effects){this.scene.remove(effect.mesh);effect.mesh.geometry.dispose();effect.mesh.material.dispose();}this.effects=[];return;}
   this.time+=dt;this.spawn(journey);
   if(this.time-this.lastDamage>4)this.shield=Math.min(100,this.shield+dt*12);
