@@ -1,3 +1,4 @@
+import {addAlienTrees} from './alien-trees.js';
 import * as THREE from 'three';
 const smooth=THREE.MathUtils.smoothstep;
 const origin=new THREE.Vector3(-.65,.52,.55).normalize();
@@ -51,8 +52,8 @@ export function addGarden(scene,center,radius){
    color.multiplyScalar(.85+.25*(i%9)/8);mesh.setColorAt(i,color);
   });mesh.computeBoundingSphere();group.add(mesh);
  }
- batch(trees,new THREE.CylinderGeometry(1,1,1,5),'trunk');
- batch(trees,new THREE.IcosahedronGeometry(1,1),'canopy');
+ addAlienTrees(group,trees,center,radius,{blossom:true});
+
  batch(flowers,new THREE.IcosahedronGeometry(1,0),'flower');
  batch(rocks,new THREE.DodecahedronGeometry(1,0),'rock');
  group.userData={trees:trees.length,flowers:flowers.length,rocks:rocks.length};return group;

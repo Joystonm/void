@@ -1,3 +1,4 @@
+import {addAlienTrees} from './alien-trees.js';
 import {peaceful} from './world.js';
 import {gardenSignals,gardenColor,addGarden} from './elysia.js';
 import * as THREE from 'three';
@@ -91,7 +92,7 @@ export function addSurfaceRocks(scene,center,radius){
   mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();group.add(mesh);
  }
  instances(rockData,new THREE.DodecahedronGeometry(1,0),new THREE.MeshStandardMaterial({roughness:1,flatShading:true}),'rock');
- instances(treeData,new THREE.IcosahedronGeometry(1,0),new THREE.MeshStandardMaterial({roughness:1,flatShading:true}),'canopy');
- instances(treeData,new THREE.CylinderGeometry(1,1,1,5),new THREE.MeshStandardMaterial({roughness:1,flatShading:true}),'trunk');
+ addAlienTrees(group,treeData,center,radius);
+
  group.userData={rocks:rockData.length,trees:treeData.length};return group;
 }
